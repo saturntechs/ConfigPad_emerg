@@ -1,0 +1,69 @@
+name: Deploy to Azure
+
+on:
+  push:
+    branches:
+      - main
+      - production
+  workflow_dispatch:
+
+env:
+  AZURE_RESOURCE_GROUP: configpad-rg
+  BACKEND_APP_NAME: configpad-backend
+  FRONTEND_APP_NAME: configpad-frontend
+  ACR_NAME: configpadacr
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Login to Azure Container Registry
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ env.ACR_NAME }}.azurecr.io
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+
+    - name: Build and push backend image
+      working-directory: ./backend
+      run: |
+        docker build -t ${{ env.ACR_NAME }}.azurecr.io/backend:${{ github.sha }} .
+        docker build -t ${{ env.ACR_NAME }}.azurecr.io/backend:latest .
+        docker push ${{ env.ACR_NAME }}.azurecr.io/backend:${{ github.sha }}
+        docker push ${{ env.ACR_NAME }}.azurecr.io/backend:latest
+
+    - name: Build and push frontend image
+      working-directory: ./frontend
+      run: |
+        docker build \
+          --build-arg REACT_APP_BACKEND_URL=https://${{ env.BACKEND_APP_NAME }}.azurewebsites.net \
+          -t ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }} .
+        docker build \
+          --build-arg REACT_APP_BACKEND_URL=https://${{ env.BACKEND_APP_NAME }}.azurewebsites.net \
+          -t ${{ env.ACR_NAME }}.azurecr.io/frontend:latest .
+        docker push ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }}
+        docker push ${{ env.ACR_NAME }}.azurecr.io/frontend:latest
+
+    - name: Deploy backend to Azure App Service
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.BACKEND_APP_NAME }}
+        images: ${{ env.ACR_NAME }}.azurecr.io/backend:${{ github.sha }}
+
+    - name: Deploy frontend to Azure App Service
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.FRONTEND_APP_NAME }}
+        images: ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }}
+
+    - name: Logout from Azure
+      run: az logout

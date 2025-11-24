@@ -1,0 +1,44 @@
+name: Docker Build Test
+
+on:
+  pull_request:
+    branches:
+      - main
+      - production
+  push:
+    branches:
+      - develop
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Build backend image
+      working-directory: ./backend
+      run: docker build -t backend:test .
+
+    - name: Build frontend image
+      working-directory: ./frontend
+      run: docker build -t frontend:test .
+
+    - name: Test with Docker Compose
+      run: |
+        docker-compose up -d
+        sleep 30
+        docker-compose ps
+        curl -f http://localhost:8001/api/ || exit 1
+        docker-compose down
+
+    - name: Check backend health
+      run: |
+        docker run -d -p 8001:8001 --name backend-test backend:test
+        sleep 10
+        curl -f http://localhost:8001/api/ || exit 1
+        docker stop backend-test
